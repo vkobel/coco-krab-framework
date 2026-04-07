@@ -1,0 +1,50 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 108" fill="white">
+  <!-- Left legs -->
+  <line x1="39" y1="76" x2="20" y2="88" stroke="white" stroke-width="4" stroke-linecap="round"/>
+  <line x1="36" y1="83" x2="16" y2="95" stroke="white" stroke-width="4" stroke-linecap="round"/>
+  <line x1="42" y1="69" x2="23" y2="77" stroke="white" stroke-width="4" stroke-linecap="round"/>
+
+  <!-- Right legs -->
+  <line x1="81" y1="76" x2="100" y2="88" stroke="white" stroke-width="4" stroke-linecap="round"/>
+  <line x1="84" y1="83" x2="104" y2="95" stroke="white" stroke-width="4" stroke-linecap="round"/>
+  <line x1="78" y1="69" x2="97" y2="77" stroke="white" stroke-width="4" stroke-linecap="round"/>
+
+  <!-- Left arm -->
+  <path d="M 35,63 Q 21,54 14,42" stroke="white" stroke-width="5.5" fill="none" stroke-linecap="round"/>
+
+  <!-- Left claw – upper finger -->
+  <ellipse cx="9" cy="26" rx="8" ry="14" transform="rotate(-12 9 26)"/>
+  <!-- Left claw – lower finger -->
+  <ellipse cx="18" cy="52" rx="6.5" ry="11" transform="rotate(20 18 52)"/>
+
+  <!-- Right arm -->
+  <path d="M 85,63 Q 99,54 106,42" stroke="white" stroke-width="5.5" fill="none" stroke-linecap="round"/>
+
+  <!-- Right claw – upper finger -->
+  <ellipse cx="111" cy="26" rx="8" ry="14" transform="rotate(12 111 26)"/>
+  <!-- Right claw – lower finger -->
+  <ellipse cx="102" cy="52" rx="6.5" ry="11" transform="rotate(-20 102 52)"/>
+
+  <!-- Body -->
+  <ellipse cx="60" cy="72" rx="27" ry="21"/>
+
+  <!-- Shell ridge -->
+  <path d="M 40,64 Q 60,59 80,64" stroke="white" stroke-width="1.8" fill="none" opacity="0.3"/>
+
+  <!-- Left eye stalk -->
+  <rect x="49" y="51" width="5" height="13" rx="2.5"/>
+  <!-- Right eye stalk -->
+  <rect x="66" y="51" width="5" height="13" rx="2.5"/>
+
+  <!-- Left eye -->
+  <circle cx="51.5" cy="44" r="9.5"/>
+  <!-- Left eye shine -->
+  <circle cx="54.5" cy="40.5" r="3.5" fill="rgba(0,0,0,0.15)"/>
+  <circle cx="54.5" cy="40.5" r="1.8" fill="rgba(0,0,0,0.3)"/>
+
+  <!-- Right eye -->
+  <circle cx="68.5" cy="44" r="9.5"/>
+  <!-- Right eye shine -->
+  <circle cx="71.5" cy="40.5" r="3.5" fill="rgba(0,0,0,0.15)"/>
+  <circle cx="71.5" cy="40.5" r="1.8" fill="rgba(0,0,0,0.3)"/>
+</svg>

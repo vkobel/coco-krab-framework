@@ -1,0 +1,39 @@
+KRAB: A Confidential Computing Verifiability Framework License
+Copyright (c) 2026 @vkobel (https://github.com/vkobel)
+
+Permission is granted to any person or organization obtaining a copy of this
+framework to use, copy, share, and adapt it, including for internal business
+purposes, research, and education, subject to the following conditions:
+
+1. ATTRIBUTION
+   Any use, distribution, or adaptation of this framework must include clear
+   attribution to the original author (@vkobel) and a link to the
+   original repository.
+
+2. NO COMMERCIAL SERVICES
+   You may not offer any service — including security audits, consulting
+   engagements, assessments, or certifications — that materially relies on
+   this framework or a derivative of it to deliver value to third parties,
+   without explicit written permission from the copyright holder (contact
+   via GitHub: https://github.com/vkobel).
+
+3. NO COMMERCIAL PRODUCTS
+   You may not incorporate this framework, or a derivative of it, into a
+   commercial product, platform, or tool offered to third parties, without
+   explicit written permission from the copyright holder (contact via
+   GitHub: https://github.com/vkobel).
+
+4. SHARE-ALIKE FOR DERIVATIVES
+   If you publicly distribute a modified or extended version of this
+   framework, it must be released under these same terms.
+
+WHAT IS PERMITTED:
+  - Using this framework internally to evaluate your own systems
+  - Referencing or citing this framework in research, papers, or blog posts
+  - Teaching or training using this framework
+  - Building internal tooling that applies this framework to your own systems
+  - Sharing this framework with colleagues or publicly, with attribution
+
+THE FRAMEWORK IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND. IN NO EVENT
+SHALL THE COPYRIGHT HOLDER BE LIABLE FOR ANY CLAIM, DAMAGES, OR OTHER
+LIABILITY ARISING FROM USE OF THIS FRAMEWORK.
