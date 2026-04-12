@@ -87,6 +87,8 @@ Prevents quote replay: binds live session to attestation evidence.
 
 **Session security alignment:** A3 + B2 + K4 = MITM-safe. Any drop creates session vulnerability.
 
+**`[OnChain]` modifier:** Append to K2–K4 when the attestation policy is governed by a public smart contract rather than a single off-chain operator (e.g. `K3[OnChain]`, `K4[OnChain]`). Changes who governs the policy, not what is enforced.
+
 ---
 
 ## Closing the Measurement Gap
@@ -97,6 +99,7 @@ Hardware measures firmware/OS at launch. Applications loaded from disk after boo
 
 1. **initramfs packing** — Bundle app into initramfs (measured at boot)
 2. **dm-verity** — Embed Merkle root hash in initramfs; kernel verifies disk blocks
+3. **Platform-only attestation** — Measured image contains only the platform layer; workload injected dynamically at launch. Chain terminates at the OS boundary unless the workload hash is bound into the application binding field and enforced at the KBS.
 
 ---
 
