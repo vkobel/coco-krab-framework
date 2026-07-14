@@ -10,6 +10,8 @@ A lightweight reference for evaluating confidential computing deployments. For f
 
 If any dimension is 0, verifiability collapses. The KRAB Vector is written: **`A | R | B | K`**.
 
+Declare evidence access as **public**, **authorized**, or **measurement-only**. Only public evidence supports a public KRAB claim.
+
 ---
 
 ## Stack Layers
@@ -35,7 +37,7 @@ Platform attestation ceiling (bottom-up constraint):
 |-------|------|------------|
 | **A0** | Unmeasured | No cryptographic proof |
 | **A1** | Provider-Rooted | Hardware root of trust = cloud provider PKI |
-| **A2** | Silicon-Rooted, Mediated | Silicon root, but CSP paravisor in attestation TCB |
+| **A2** | Silicon-Rooted, Mediated | Silicon root, but provider mediation or launch control remains in the attestation TCB |
 | **A3** | Silicon-Rooted, Direct | Silicon root of trust, raw hardware quote access |
 
 If measurement chain fractures at any layer, effective A collapses to **A0**.
@@ -51,25 +53,27 @@ If measurement chain fractures at any layer, effective A collapses to **A0**.
 | **R2** | Maintainer-Signed | Cryptographic assertion of source-to-binary |
 | **R2+** | Threshold Multi-Party | M-of-N maintainer signatures |
 | **R3** | Provenance-Verified | SLSA provenance, trusted CI/CD |
-| **R4** | Deterministic/Reproducible | Anyone can rebuild to identical hash |
+| **R4** | Deterministic/Reproducible | Independent parties rebuild declared source and inputs to an identical hash |
 
 ### Expanded Notation
 
 **`R[fX/oX/lX/aX]`** — per-layer grades (e.g., `R[f0/o0/l4/a4]`).
 
+For R4, record hermeticity, immutable input/toolchain pins, independent rebuilds, toolchain reproducibility, and opaque bootstrap seeds. A public R4 claim requires at least one rebuild outside the original pipeline. Do not create a new R-level for these attributes.
+
 ---
 
 ## B — Session Binding
 
-Prevents quote replay: binds live session to attestation evidence.
+Separates freshness from proof of the actual recipient or channel.
 
 | Level | Name | Behavior |
 |-------|------|----------|
 | **B0** | Unbound | Application binding field absent, static, or unchecked |
-| **B1** | Bound, Weakly Enforced | Field used but replayable or weakly validated |
-| **B2** | Dynamically Bound & Enforced | Fresh session data hashed into field, strict verifier enforcement, quote TTL |
+| **B1** | Freshness-Only / Weakly Bound | Fresh nonce without recipient binding, or binding that is replayable, optional, or weakly enforced |
+| **B2** | Recipient-Bound & Enforced | Freshness plus an attested ephemeral recipient/channel key; the operation continues only through that key |
 
-**MITM Risk:** Without B2, an attacker can obtain a valid quote from a real TEE and present it over their own channel to receive secrets. The quote proves the binary — not who receives the key.
+**B2 requires:** (1) single-use challenge or equivalent TTL policy, (2) attested recipient/channel key, and (3) release encrypted to or authorized through that exact key. A nonce alone is B1 because it can be relayed.
 
 ---
 
@@ -81,11 +85,11 @@ Prevents quote replay: binds live session to attestation evidence.
 | **K1** | Signature-Bound | Verifies quote, but trusts maintainer signature |
 | **K2** | Provider-Delegated | CSP's attestation policy gates release |
 | **K3** | Artifact-Bound | Verifies exact measurements, but no session binding |
-| **K4** | Dynamically-Bound | Verifies measurements **and** session binding |
+| **K4** | Dynamically-Bound | Verifies measurements and B2 binding; restricts release to the bound key/channel |
 
-**Debug rejection:** K3/K4 must reject quotes from debug-mode TEEs.
+**K3/K4 minimum checks:** evidence signature and trust chain, revocation/collateral, minimum security version, complete claimed measurement set, and debug rejection.
 
-**Session security alignment:** A3 + B2 + K4 = MITM-safe. Any drop creates session vulnerability.
+**Session security alignment:** B2 + K4 provides relay-resistant release, conditional on the accepted A trust anchor. A1/A2 expand who is trusted to authenticate the evidence; they do not remove the protocol binding.
 
 **`[OnChain]` modifier:** Append to K2–K4 when the attestation policy is governed by a public smart contract rather than a single off-chain operator (e.g. `K3[OnChain]`, `K4[OnChain]`). Changes who governs the policy, not what is enforced.
 
@@ -103,20 +107,22 @@ Hardware measures firmware/OS at launch. Applications loaded from disk after boo
 
 ---
 
-## Composability (CPU + GPU)
+## Composability
 
-Multi-TEE workloads require cryptographic binding between attestation domains.
+For CPU/GPU, nested, redundant-root, or multi-service TEE systems:
 
-**Required protocol (CPU → GPU):**
-
-1. CPU measures GPU via SPDM over PCIe
-2. CPU verifies GPU's attestation report  
-3. CPU binds GPU report hash into its own application binding field
+1. Score every attestation domain separately.
+2. Verify each domain against its own trust anchor and measurement policy.
+3. Bind all required domains to the same workload/session key, or bind one verified report into another.
+4. Enforce the declared all-of-N or M-of-N rule before release.
+5. Declare shared roots/operators; reports sharing one failure domain are not independent roots.
 
 **Notation:**
 
-- `B2*` — application binding field includes second TEE's attestation report
+- `B2*` — application binding field includes another domain's verified report
 - `[CPU: A3 | R[...] | B2* | K4]` + `[GPU: A1 | R[...] | B2 | K0]`
+
+`+` shows separately scored domains; it does not assert composition without the binding and policy checks above.
 
 ---
 
@@ -133,6 +139,8 @@ Multi-TEE workloads require cryptographic binding between attestation domains.
 
 ## Scorecard Template
 
+A public score MUST link a machine-readable evidence packet covering source/build inputs, artifact and measurement mapping, attestation/collateral checks, recipient binding, policy version, verifier version, timestamp, and per-check results.
+
 | Dimension | Score | Justification |
 |-----------|-------|---------------|
 | **A: Attestation** | | |
@@ -141,6 +149,17 @@ Multi-TEE workloads require cryptographic binding between attestation domains.
 | **K: Key Release** | | |
 
 **KRAB Vector:** `A | R[f?/o?/l?/a?] | B | K`
+
+Also record:
+
+- evidence access class and evidence-packet digest
+- release authority and M-of-N policy, if any
+- reference-value update, rollback, expiry, and revocation controls
+- protected data path and first plaintext boundary
+- production/debug operating state
+- composition graph and enforced threshold
+
+Threshold custody and governance do not raise K by themselves.
 
 ---
 

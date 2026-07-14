@@ -28,6 +28,12 @@ This framework measures **independently verifiable claims**. Each dimension is d
 
 This distinction is not about deployment confidentiality — a production system can be private. It is about the _evidence_ behind each grade: are the artifacts and attestation tooling published such that an independent party could check the score themselves?
 
+Every scorecard MUST declare its **evidence access class**:
+
+- **Public** — any independent verifier can obtain the evidence, tooling, and build inputs needed to reproduce the claim.
+- **Authorized** — verification is reproducible only by parties with access to private source or artifacts. This is an internal assessment, not a public score.
+- **Measurement-only** — the verifier can authenticate and compare known measurements, but cannot independently establish their correspondence to source. This cannot support an R4 claim.
+
 ---
 
 ## 1. The Stack, Deployment Context, and KBS
@@ -115,9 +121,21 @@ Each component in the stack gets its own R level.
 | R2    | Maintainer-Signed            | Binary signed by one or more maintainers asserting it was built from the published source. Source-to-binary correspondence is asserted cryptographically but not independently verifiable.                                           |
 | R2+   | Threshold Multi-Party Signed | Binary signed by M-of-N independent maintainers (e.g., Turnkey's StageX). All M must collude to forge the claim, raising the bar above a single-key compromise. Source-to-binary correspondence remains asserted, not independently verifiable. |
 | R3    | Provenance-Verified          | Signed build provenance (e.g. SLSA), trusted CI/CD pipeline. The build process is auditable (requires evaluating the build system separately) — the CI pipeline's integrity is now part of the claim.                                |
-| R4    | Deterministic / Reproducible | Anyone can rebuild from source to identical hash. No trust in any builder or maintainer required.                                                                                                                                    |
+| R4    | Deterministic / Reproducible | Independent parties can rebuild from declared source and inputs to an identical hash. No trust in the original builder or maintainer is required for that source-to-artifact correspondence.                                         |
 
-> **R2, R3, and the build system:** R2 shifts trust to the maintainer's key(s) — if compromised, the claim collapses to R1. R3 shifts trust to the CI/CD pipeline: SLSA provenance and signed logs provide real evidence, but the build system is now in your trust chain. R4 eliminates the build system as a trust dependency.
+> **R2, R3, and the build system:** R2 shifts trust to the maintainer's key(s) — if compromised, the claim collapses to R1. R3 shifts trust to the CI/CD pipeline: SLSA provenance and signed logs provide real evidence, but the build system is now in your trust chain. R4 removes dependence on the original build system because others can reproduce its output; it does not automatically prove that every compiler bootstrap seed or toolchain binary is transparent.
+
+#### R4 Evidence Attributes
+
+Do not add new R-levels for build-system quality. Instead, every R4 justification MUST state:
+
+- whether the build is hermetic/offline
+- whether all source, dependencies, base images, and toolchains are immutably pinned
+- how many independent rebuilds were performed and in which environments
+- whether the compiler/toolchain is itself reproducible or full-source bootstrapped
+- any opaque bootstrap seeds or prebuilt tools that remain trusted
+
+A public R4 claim requires at least one successful independent rebuild outside the original build pipeline.
 
 #### Expanded R Notation: Per-Layer Grading
 
@@ -155,15 +173,23 @@ R and A prove _what binary was built_ and _what trust boundary attests it_. They
 
 **Session binding** prevents this. The workload generates an ephemeral TLS key pair, hashes the public key into the quote, and the KBS checks that the public key in the quote matches the TLS connection delivering the secret. Now the quote is bound to a specific channel — replay it on a different connection and the hash won't match. *(RA-TLS — Remote Attestation TLS, available in Gramine and other SGX/TDX runtimes — is the canonical protocol implementing this pattern: the TLS certificate's public key hash is embedded directly in the attestation report, making it machine-verifiable by any relying party.)*
 
-A **session** in this context is any single cryptographic interaction between an external party and the workload — a TLS handshake, a key exchange, a challenge-response. The data bound into the quote (a public key hash, a nonce, key exchange parameters) is what this document calls **session data**.
+A **session** in this context is any single cryptographic interaction between an external party and the workload — a TLS handshake, a key exchange, or a challenge-response. Session data can include a verifier challenge, an ephemeral recipient public key, a channel-exporter digest, or key-exchange parameters.
+
+Freshness and recipient binding are distinct. A verifier-issued nonce proves that evidence was produced for a fresh challenge, but an attacker can relay that challenge to a genuine TEE. A nonce alone therefore prevents simple replay but does not prove which channel or recipient receives a released secret.
 
 Every TEE platform provides an **application binding field** — a slot in the hardware quote that the application fills with session data. The hardware provides the slot, but it is the application that fills it. It is the app's anchor into the attestation evidence — effectively acting as the verifier's session anchor in the quote. Without the app actively using it, the field sits empty and B = 0. Platform-specific names vary: `REPORTDATA` (TDX), `REPORT_DATA` (SEV-SNP), `user_data` (Nitro), `cca-realm-challenge` (ARM CCA). This document uses **application binding field** as the platform-neutral term.
 
 | Level  | Name                         | Enforcement Behavior                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | ------ | ---------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **B0** | Unbound                      | The application binding field is absent, zeroed, filled with static strings, or left unchecked by the application and verifier.                                                                                                                                                                                                                                                                                                         |
-| **B1** | Bound, Weakly Enforced       | The application binding field is used, but the payload is static, stale, replayable, or only weakly validated. This includes fixed strings, reused nonces, old challenges, or checks that are optional, delegated, or easy to bypass. Also includes verifier-side failures — for example, where the field is populated correctly with fresh data, but the verifier delegates, makes optional, or skips checking it in production paths. |
-| **B2** | Dynamically Bound & Enforced | The application actively generates or accepts dynamic/fresh session data, hashes it into the application binding field and uses it in the protocol. The verifier or key-release path strictly enforces a match before proceeding. Dynamic session binding also enforces a strict **Quote Freshness / TTL** window — quotes older than a few minutes are rejected, preventing replay of previously-valid sessions.                       |
+| **B1** | Freshness-Only / Weakly Bound | Evidence contains a fresh nonce but no recipient or channel key, or contains binding data that is static, stale, replayable, optional, or weakly enforced. Freshness-only evidence remains relayable.                                                                                                                                                                                                      |
+| **B2** | Recipient-Bound & Enforced    | Evidence binds both a freshness value and an ephemeral recipient/channel key. The verifier enforces the match, and the subsequent secret or privileged operation is encrypted to or authorized through that exact key. Freshness is enforced through a single-use challenge or an equivalent timestamp/TTL policy.                                                                                       |
+
+To award B2, the assessor MUST verify all three properties:
+
+1. **Freshness** — a single-use unpredictable challenge, or equivalent timestamp/TTL policy, is enforced.
+2. **Recipient binding** — an ephemeral public key or channel identity is cryptographically bound into the attestation evidence.
+3. **Protocol continuation** — the released secret or privileged operation is restricted to that exact bound key or channel.
 
 > **Collapse rule:** An application can be perfectly reproducible and silicon-measured, but if it is Unbound (B0), the quote is semantically meaningless for proving session identity to external verifiers. In the verifiability equation, `B = 0` and the architecture is flawed.
 
@@ -178,10 +204,13 @@ _Always required when secret release is part of the system design._
 | **K1** | Signature-Bound / Maintainer Trust   | The service verifies a hardware quote, but the release policy is anchored only to a developer or maintainer signature/certificate rather than an exact artifact identity. K1 can only provide evidence equivalent to R2-level trust, regardless of the underlying binary's actual R-grade — a compromised maintainer key collapses the claim. |
 | **K2** | Provider-Delegated                   | The system relies on the CSP's internal attestation policy engine to gate release (for example, AWS KMS with `RecipientAttestation`). Useful, but trust is delegated to the provider's opaque verifier and policy implementation.                                                                                                             |
 | **K3** | Artifact-Bound / Deterministic Trust | The service independently verifies the quote and enforces exact artifact measurements such as PCR0, MRTD, or deterministic binary hashes. This can support **R4**, but it does not verify dynamic session binding and remains vulnerable to MITM or replay.                                                                                   |
-| **K4** | Dynamically-Bound / Full Enforcement | The service verifies exact artifact measurements **and** the dynamic session binding carried in the application binding field. Secrets are released only to the exact secure session requesting them.                                                                                                                                         |
+| **K4** | Dynamically-Bound / Full Enforcement | The service verifies exact artifact measurements **and** the B2 recipient binding carried in the application binding field. Release is encrypted to or otherwise authorized exclusively through the bound recipient key or channel.                                                                                                        |
 
 **Collateral and security-version validation:** K3 and K4 require complete verification of the platform collateral behind the quote, not just the values self-reported inside the quote body. This includes:
 - **Debug attribute rejection:** Quotes from TEEs running in debug mode MUST be rejected. Debug mode allows the host to read or modify TEE memory — attestation is meaningless. Platform-specific checks include TDX's `td_attributes` debug bit, SEV-SNP's debug bit in attestation report, and equivalent flags across all TEE platforms. A KBS that accepts debug-mode quotes has collapsed to K0 in practice.
+- **Evidence authenticity:** Verify the evidence signature, complete certificate/endorsement chain, revocation state, and certificate validity.
+- **Security-version policy:** Enforce minimum TCB/security versions and reject known-vulnerable or downgraded states.
+- **Complete measurement policy:** Check every measurement needed to cover the claimed workload, not merely one convenient launch register.
 
 **Instance identity (multi-tenant note):** Some platforms also expose launch identity fields such as TDX `HOSTDATA`. These are distinct from dynamic session binding. Session binding ties a live session to a quote; instance identity distinguishes one launched workload instance from another. Where available, a strong `K` policy should use both.
 
@@ -191,13 +220,13 @@ Register names used in this document refer to hardware measurement state: MRTD i
 
 **Key delivery transport (CRQC advisory):** K scores enforcement logic — whether the KBS gates secret release on the correct attestation evidence. It does not score the cryptographic algorithm used to wrap and deliver the released secret. Deployments under a CRQC threat model should use ML-KEM for key delivery — this is orthogonal to the K score. K4 with ECDH transport and K4 with ML-KEM transport have identical enforcement strength; only the quantum resistance of the delivery channel differs. Note that B's session binding often uses cryptographic hashing (e.g., SHA-384/SHA-512) which is already PQ-resistant; the PQ concern is solely about key encapsulation at secret delivery, not about the B score.
 
-**Session security alignment:** A system is session-secure against MITM and replay only when A3, B2, and K4 align. A3 provides a direct, non-mediated quoting path with minimal TCB. B2 carries fresh session identity into the quote. K4 verifies that bound identity before releasing secrets. If any one drops, the system regains a session-level vulnerability: A3→A2 expands the TCB to include the CSP paravisor; B2→B1/B0 means fresh identity is no longer carried through the protocol; K4→K3 means the KBS may release secrets to the wrong session. R is deliberately absent from this triad — R measures build-time provenance, not whether the live session is bound to the attested workload. A system on an A2 platform (e.g. Azure TDX) can achieve B2 and K4, but does so by extending its trust boundary to include the CSP's paravisor. Only A3 achieves this alignment with a pure silicon root of trust.
+**Session security alignment:** B2 + K4 provides relay-resistant secret delivery, conditional on the accepted A trust anchor behaving honestly. B2 proves freshness and binds the recipient key or channel; K4 enforces that binding during release. A controls who can authenticate or counterfeit that evidence: moving from A3 to A2 or A1 expands the accepted trust boundary, but does not itself remove the protocol binding. R is deliberately absent from this relationship because it measures build-time provenance rather than live-session identity.
 
 **The `[OnChain]` modifier** may be appended to any K-level (K2–K4) to indicate that the attestation policy — which code digests are approved for key release — is governed by a public smart contract rather than a single off-chain KBS operator. The policy logic is publicly auditable and forkable; no single operator controls the approval gate unilaterally.
 
 `K3[OnChain]` — exact artifact measurements enforced, approved digest set governed on-chain. `K4[OnChain]` — same, with dynamic session binding also enforced. *(e.g., Marlin Nautilus contract variant, Phala DeRoT — both publish approved code digests on-chain and gate key derivation against that contract state.)*
 
-The modifier does not change the enforcement level (K3 vs K4) — it changes who governs the policy. The distinct failure modes introduced are governance attacks (contract upgrade paths, chain consensus assumptions) rather than the single-operator compromise risk of a standard KBS.
+The modifier does not change the enforcement level (K3 vs K4) — it changes who governs the policy. The distinct failure modes introduced are governance attacks (contract upgrade paths, chain consensus assumptions) rather than the single-operator compromise risk of a standard KBS. On-chain governance is one release-authority model and MUST still be documented alongside the general policy-lifecycle fields in the scorecard.
 
 ---
 
@@ -223,7 +252,7 @@ Attestation remains a bottom-up architectural constraint. The platform sets a st
 
 ### CSP Trust vs. Architectural Flaws
 
-The strongest KRAB profile is `A3 | R[f4/o4/l4/a4] | B2 | K4`: direct silicon-rooted attestation, every layer reproducible, dynamic session binding, and strict key-release enforcement.
+The strongest KRAB profile is `A3 | R[f4/o4/l4/a4] | B2 | K4`: direct silicon-rooted attestation, every layer reproducible, recipient-bound session enforcement, and strict key release.
 
 Real-world engineering does not always optimize for that profile. Teams often choose platforms such as **AWS Nitro** (`A1`) or **Azure TDX** (`A2`) because of their maturity, tooling, and operational reliability. In KRAB, that is **not automatically an architectural flaw**. It is a **conscious trust delegation**. If the Threat Model explicitly accepts the platform as part of the Trusted Computing Base, the design can still be coherent and production-worthy.
 
@@ -257,21 +286,22 @@ The table below maps common real-world engineering configurations to their KRAB 
 | `A1[AWS Nitro] \| R[f0/o4/l4/a4] \| B0 \| K3[OnChain]` | Decentralized TEE compute, platform-only attestation, on-chain policy governance | Provider-rooted attestation. Platform layer is reproducible (`o4/l4`), and the workload is independently reproducible (`a4`), but the workload is injected dynamically at launch and absent from PCR measurements. PCRs attest the platform only — the measurement chain terminates at the OS boundary. Policy over approved platform images is governed on-chain. Without explicit workload binding into the application binding field and KBS enforcement, the running workload remains unverifiable regardless of its build reproducibility. |
 | `A3 \| R[f0/o0/l0/a0] \| B0 \| K0`            | Opaque workload on strong hardware                                                                   | The platform is strong, but the workload is a black box. No layer can be independently verified, no session binding, no attestation-gated key release — the TEE is earning nothing.                             |
 
-### Composability & Mixed Workloads (CPU + GPU)
+### Composability Across Attestation Domains
 
-When a workload spans multiple TEEs — for example, a CPU TEE passing data to a GPU TEE — each component must be scored independently, and the **trust link between them must be cryptographically established**.
+When a workload spans multiple attestation domains — CPU and GPU TEEs, nested enclaves, redundant hardware roots, or multiple TEE services — score every domain independently and model their cryptographic links as a graph. Co-location, orchestration, or policy text alone does not compose trust.
 
-A CPU TEE and a GPU TEE are separate attestation domains. Simply running code in both does not establish a verifiable trust relationship between them. SPDM — Security Protocol and Data Model — is the DMTF standard protocol used to perform hardware attestation over PCIe between a CPU TEE and a GPU. To achieve end-to-end verifiable trust, the CPU TEE must:
+A compound claim requires all of the following:
 
-1. **Measure the GPU** — via SPDM over PCIe, retrieving the GPU's hardware attestation report.
-2. **Verify the GPU's attestation report** — confirming the GPU's identity and integrity against the expected hardware certificate chain.
-3. **Bind the GPU report into the CPU TEE's own quote** — by including a hash or digest of the verified GPU report in the CPU TEE's application binding field before generating its own quote.
+1. **Independent evidence** — each domain produces evidence that is verified against its own trust anchor and measurement policy.
+2. **Common workload/session identity** — all required domains bind the same workload identity and live recipient/channel key, or one domain binds the digest of another domain's verified report.
+3. **Policy enforcement** — the relying party enforces the declared all-of-N or M-of-N rule before releasing data or secrets.
+4. **Declared independence** — shared roots, operators, firmware, verifiers, and update authorities are listed. Two reports sharing one failure domain are not two independent trust roots.
 
-Without step 3, an external verifier who validates the CPU quote has no evidence about which GPU — or whether any authentic GPU — is actually receiving the sensitive data.
+For CPU-to-GPU composition, SPDM is a common transport for retrieving the GPU report. The CPU TEE must verify that report and bind its digest into the CPU evidence. Without that final binding, the domains are adjacent rather than cryptographically composed.
 
 #### Compound Vector Notation
 
-Score each component separately with its own full KRAB Vector. When the 3-step binding protocol above is completed, note the binding explicitly in the CPU component's B dimension justification — it is the application binding field that establishes the cryptographic link between the two attestation domains.
+Score each component separately with its own full KRAB Vector. Document the graph edge in the binding component's B justification.
 
 The `*` suffix on a B score (e.g. `B2*`) indicates that the component's application binding field also binds a second TEE's attestation report — establishing a cryptographic link between two separate attestation domains.
 
@@ -284,16 +314,20 @@ The `*` suffix on a B score (e.g. `B2*`) indicates that the component's applicat
 
 > **`[CPU: A3 | R[f0/o1/l4/a4] | B2 | K4]`** + **`[GPU: A1[NVIDIA] | R[f0/o0/l0/a0] | B2 | K0]`**
 
-The `+` operator indicates two independently scored components. The binding claim lives in the CPU scorecard's B2 justification text, not in a separate notation symbol. If the CPU TEE does not bind the GPU report into its own application binding field, the two vectors are unlinked and no compound trust claim holds — they are simply two separate systems that happen to run together.
+The `+` operator indicates separately scored components; it does not itself assert composition. If the required report/session binding or relying-policy enforcement is missing, the vectors remain unlinked.
 
 ### Advisory Dimensions
 
-The KRAB Vector captures verifiability. Two additional dimensions should accompany any thorough audit as advisory metrics. They do not alter the KRAB Vector but provide essential context for interpreting it.
+The KRAB Vector captures verifiability. The following advisory dimensions should accompany a thorough audit. They do not alter the vector.
 
 | Dimension                          | What to assess                                                                                                                                                                                   |
 | ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | **TCB Minimization**               | Is the trusted footprint proportionate to the workload? A high-scoring KRAB Vector on a 50 MB TCB is qualitatively different from the same vector on a 500 MB TCB.                               |
 | **Verifiability Tooling Maturity** | Do independent tools exist to validate attestation evidence without trusting the vendor's own SDK? Note whether third-party verifiers, open-source tooling, or documented APIs cover each layer. **On-chain attestation verifiers** — smart contracts that parse attestation documents, verify certificate chains, and check measurements — represent the strongest form of independent tooling: the verification logic is itself public, auditable, and not controlled by any single operator *(e.g., Automata Network's DCAP attestation contracts, which support SGX, TDX, AMD SEV-SNP, and Nitro)*. Note the distinct failure modes: gas limits, chain finality assumptions, and governance of the verifier contract itself. |
+| **Release Authority**              | Who can authorize release: one operator, a provider, M-of-N distinct principals, or public governance? Is each approval bound to the evidence and session digest? Threshold custody does not raise K by itself. |
+| **Reference-Value Lifecycle**      | Who approves measurement-policy updates? Record signatures or thresholds, versioning, rollback protection, expiry, emergency revocation, audit history, and workload/policy rollout atomicity. |
+| **Protected Data Path**            | Where does transport encryption terminate, where does plaintext first appear, and is application data encrypted to an attested key? A strong KRAB vector does not by itself prove end-to-end data confidentiality. |
+| **Operating State**                | Is the assessed instance in the same production state that serves traffic? Record debug flags, diagnostic interfaces, host access, and state transitions. Debug-enabled evidence cannot support a production claim. |
 
 ---
 
@@ -307,19 +341,56 @@ The KRAB Vector is linear:
 
 If `A < A3`, the score should append the accepted platform trust anchor in brackets to make the threat-model assumption explicit.
 
+### Verification Evidence Packet
+
+A **public** KRAB claim MUST publish a machine-readable evidence packet. Authorized/internal assessments SHOULD produce the same packet within their access boundary. It MUST contain or link to:
+
+- scorecard schema/version, target identity, deployment context, and evidence access class
+- source locations and immutable revisions; build recipe, input, dependency, base-image, and toolchain digests
+- produced artifact digest, expected measurements, and a map from each measurement field to the workload component it covers
+- attestation evidence, accepted trust roots, collateral/revocation result, minimum security-version result, and debug-state result
+- freshness mechanism, bound recipient/channel-key digest, and proof that protocol continuation uses that key
+- reference-policy identity/version, release authority, update/rollback rules, and verification timestamp
+- verifier implementation/version and pass/fail result for every normative check
+
+The packet SHOULD include negative-test results for wrong or missing measurements, stale/reused challenges, recipient-key mismatch, debug mode, invalid/expired/revoked endorsement chains, downgraded security versions, malformed evidence, and unsupported algorithms.
+
+**Manifest binding rule:** Claims treated as authenticated runtime evidence MUST be inside the attestation or digest-bound to it. An untrusted build manifest may instead be used to derive expected measurements, but the verifier MUST independently rebuild and compare those measurements with authenticated evidence. Dynamic claim digests MUST use canonical serialization, a schema version, and a purpose tag.
+
+### Scorecard Context Fields
+
+In addition to the four grades, record:
+
+```text
+Evidence access class: public | authorized | measurement-only
+Evidence packet: URI and digest
+Release authority: model, threshold, distinct-principal enforcement
+Reference-value lifecycle: owner, policy version, update and rollback controls
+Protected data path: encryption termination and first plaintext boundary
+Operating state: production/debug and exposed diagnostic access
+Composition graph: domains, trust anchors, cryptographic edges, enforced threshold
+```
+
 ### Example Scorecard
 
 The following is a fictional example showing what a completed KRAB Scorecard looks like in practice.
 
-**Target:** Confidential Signing Service v1.2 (fictional)  
-**Deployment Context:** Azure TDX CVM
+- **Target:** Confidential Signing Service v1.2 (fictional)
+- **Deployment Context:** Azure TDX CVM
+- **Evidence Access:** Public
+- **Evidence Packet:** `https://example.invalid/evidence/signing-service-v1.2.json` (`sha256:<digest>`)
+- **Release Authority:** Single-operator KBS
+- **Reference-Value Lifecycle:** Signed policy v17; two-person updates; rollback denied
+- **Protected Data Path:** Attested TLS key terminates inside the workload
+- **Operating State:** Production; debug evidence rejected
+- **Composition Graph:** Single attestation domain
 
 | Dimension              | Score              | Justification                                                                                                                                                                                                                                                                                                                            |
 | ---------------------- | ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **A: Attestation**     | **A2[Azure TDX]**  | **Silicon-Rooted, Mediated.** The workload runs on Intel TDX, but attestation is mediated through Azure TDX's OpenHCL paravisor. The platform remains silicon-rooted, but Azure's mediation layer is inside the attestation TCB.                                                                                                         |
 | **R: Reproducibility** | **R[f1/o0/l4/a4]** | **Severe Verification Gap.** The application and libraries are deterministically reproducible (`a4`, `l4`), but the stack rests on an opaque Azure guest OS (`o0`) and source-available-but-non-reproducible Azure TDX firmware (`f1`). The lower layers remain opaque, creating a significant verification gap beneath the application. |
-| **B: Session Binding** | **B2**             | **Dynamically Bound & Enforced.** The application generates fresh session identity and hashes it into the application binding field, allowing verifiers to tie the live session to the attested workload and resist replay or misbinding.                                                                                                |
-| **K: Key Release**     | **K4**             | **Dynamically-Bound / Full Enforcement.** The KBS verifies the hardware quote, validates vendor collateral and platform security-version state, checks the expected measurements, and strictly enforces the bound application binding field payload before releasing the signing seed.                                                   |
+| **B: Session Binding** | **B2**             | **Recipient-Bound & Enforced.** The application binds a fresh challenge and ephemeral TLS public-key digest into the evidence. The verifier enforces both, and protocol continuation uses that exact TLS key.                                                                                                                             |
+| **K: Key Release**     | **K4**             | **Dynamically-Bound / Full Enforcement.** The KBS verifies the quote, collateral, security-version state, expected measurements, freshness, and bound TLS key, then releases the signing seed only through that channel.                                                                                                                  |
 
 #### The KRAB Vector
 
@@ -328,7 +399,7 @@ The KRAB Vector is the at-a-glance cryptographic and operational map of the syst
 > **`A2[Azure TDX] | R[f1/o0/l4/a4] | B2 | K4`**
 
 **Executive Summary:**  
-The architecture achieves dynamic security alignment: the application carries fresh identity into its own session flow (`B2`), and the KBS enforces that exact binding before releasing secrets (`K4`). The threat model explicitly accepts Azure TDX's mediation layer into the TCB (`A2[Azure TDX]`). While the application and libraries achieve maximum reproducibility (`l4/a4`), the system carries a significant verification gap at its foundation — the firmware is source-available but not reproducible (`f1`), and the guest OS is fully opaque (`o0`).
+The architecture achieves relay-resistant secret delivery: the application binds freshness and its ephemeral recipient key into the session (`B2`), and the KBS restricts release to that key (`K4`). The threat model explicitly accepts Azure TDX's mediation layer into the TCB (`A2[Azure TDX]`). While the application and libraries achieve maximum reproducibility (`l4/a4`), the system carries a significant verification gap at its foundation — the firmware is source-available but not reproducible (`f1`), and the guest OS is fully opaque (`o0`).
 
 ---
 
